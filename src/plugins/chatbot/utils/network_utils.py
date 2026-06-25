@@ -10,13 +10,11 @@ class NetworkUtils:
     提供网络连通性检测和代理切换功能
     """
     
-    # 测试URL列表
+    # 测试URL（使用常见的可达站点，不暴露敏感域名）
     TEST_URLS = [
-        "https://www.cdnhth.club",
-        "https://www.cdngwc.cc",
-        "https://www.cdnhth.net",
-        "https://www.cdnbea.net",
-        "https://18comic.vip"
+        "https://www.baidu.com",
+        "https://www.google.com",
+        "https://www.cloudflare.com",
     ]
     
     @staticmethod
@@ -34,7 +32,7 @@ class NetworkUtils:
                     logger.info(f"[Network] 裸连测试成功: {url}")
                     return True
             except Exception as e:
-                logger.debug(f"[Network] 裸连测试失败: {url} - {e}")
+                logger.debug(f"[Network] 裸连测试失败: {url}")
                 continue
         
         logger.warning("[Network] 所有裸连测试失败，需要代理")
@@ -57,10 +55,11 @@ class NetworkUtils:
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }, proxies=proxies)
                 if response.status_code == 200:
-                    logger.info(f"[Network] 代理测试成功: {proxy} - {url}")
+                    logger.info(f"[Network] 代理测试成功: {proxy}")
                     return True
             except Exception as e:
-                logger.debug(f"[Network] 代理测试失败: {proxy} - {url} - {e}")
+                # 不打印详细错误，只记录URL
+                logger.debug(f"[Network] 代理测试失败: {url}")
                 continue
         
         logger.warning(f"[Network] 代理测试失败: {proxy}")

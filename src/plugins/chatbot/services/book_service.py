@@ -63,15 +63,137 @@ class BookService:
         if not ids:
             return "❌ 请提供 ID"
 
-        logger.info(f"[JM] 开始下载任务: {ids}")
+        # 去重
+        ids = list(dict.fromkeys(ids))
         
-        # 1. 下载 (返回: [{'id':..., 'path':...}])
-        downloaded_items = await self._run_sync_download(ids)
-        if not downloaded_items:
-             return "❌ 下载失败或无文件生成。"
-
-        # 2. 批量处理并发送
-        return await self._batch_process_and_send(bot, target_id, message_type, downloaded_items)
+        logger.info(f"[JM] 开始下载任务: {len(ids)}个本子")
+        
+        # 先检查一次网络
+        self._check_and_update_network()
+        
+        # 发送处理中消息
+        msg_text = f"⏳ 开始处理 {len(ids)} 个本子...\n🔒 加密密码：114514"
+        if message_type == "group":
+            await bot.send_group_msg(group_id=target_id, message=msg_text)
+        else:
+            await bot.send_private_msg(user_id=target_id, message=msg_text)
+        
+        # 流式处理：边下边转换边发
+        loop = asyncio.get_running_loop()
+        success_count = 0
+        failed_ids = []
+        series_ids_all = []
+        
+        async def process_and_send_single(album_id):
+            """下载单个本子，转换，发送"""
+            nonlocal success_count, failed_ids, series_ids_all
+            
+            try:
+                # 1. 下载（在线程池中执行）
+                items = await loop.run_in_executor(None, self._sync_download_single, album_id)
+                if not items:
+                    failed_ids.append(album_id)
+                    return
+                
+                for item in items:
+                    source_path = item['path']
+                    title = item.get('title', source_path.stem)
+                    series_ids = item.get('series_ids', [])
+                    
+                    # 收集系列本ID
+                    if series_ids:
+                        series_ids_all.extend(series_ids)
+                    
+                    # 2. 转换为PDF
+                    target_pdf = source_path
+                    if source_path.suffix.lower() != '.pdf':
+                        expected_pdf_path = self.repo.get_pdf_output_path(source_path)
+                        if expected_pdf_path.exists():
+                            target_pdf = expected_pdf_path
+                        else:
+                            result_str = await loop.run_in_executor(
+                                None, PDFUtils.convert_zip_to_pdf,
+                                str(source_path), str(self.repo.output_dir)
+                            )
+                            if result_str and Path(result_str).exists():
+                                target_pdf = Path(result_str)
+                    
+                    # 3. 加密
+                    ready_to_send = target_pdf
+                    is_temp = False
+                    if ready_to_send.suffix.lower() == '.pdf':
+                        temp_path = self.temp_dir / f"enc_{uuid.uuid4().hex[:8]}_{target_pdf.name}"
+                        enc_path = await loop.run_in_executor(
+                            None, self._encrypt_pdf_task, target_pdf, temp_path, "114514"
+                        )
+                        if enc_path and enc_path.exists():
+                            ready_to_send = enc_path
+                            is_temp = True
+                    
+                    # 4. 发送
+                    safe_title = "".join(c for c in title if c not in '<>:"/\\|?*') or album_id
+                    send_name = f"{safe_title}.pdf"
+                    
+                    if ready_to_send.exists():
+                        file_size = ready_to_send.stat().st_size
+                        timeout = 30 + (file_size / (50 * 1024))
+                        
+                        try:
+                            if message_type == "group":
+                                await bot.call_api("upload_group_file", group_id=target_id,
+                                    file=str(ready_to_send.absolute()), name=send_name, timeout=timeout)
+                            else:
+                                await bot.call_api("upload_private_file", user_id=target_id,
+                                    file=str(ready_to_send.absolute()), name=send_name, timeout=timeout)
+                            success_count += 1
+                            logger.info(f"[JM] ✅ 发送成功: {send_name}")
+                        except Exception as e:
+                            logger.error(f"[JM] ❌ 发送失败 {album_id}: {e}")
+                            failed_ids.append(album_id)
+                        
+                        # 清理临时文件
+                        if is_temp:
+                            await asyncio.sleep(1)
+                            try:
+                                ready_to_send.unlink()
+                            except:
+                                pass
+                    else:
+                        failed_ids.append(album_id)
+                        
+            except Exception as e:
+                logger.error(f"[JM] 处理失败 {album_id}: {e}")
+                failed_ids.append(album_id)
+        
+        # 并行处理所有本子（限制并发数避免过多）
+        semaphore = asyncio.Semaphore(5)  # 最多5个并发
+        
+        async def limited_process(album_id):
+            async with semaphore:
+                await process_and_send_single(album_id)
+        
+        tasks = [limited_process(aid) for aid in ids]
+        await asyncio.gather(*tasks)
+        
+        # 发送系列本信息
+        if series_ids_all:
+            unique_ids = sorted(set(series_ids_all))
+            series_msg = f"📚 系列本关联章节ID：\n{', '.join(unique_ids)}"
+            try:
+                if message_type == "group":
+                    await bot.send_group_msg(group_id=target_id, message=series_msg)
+                else:
+                    await bot.send_private_msg(user_id=target_id, message=series_msg)
+            except:
+                pass
+        
+        # 汇总
+        msg = f"✅ 任务完成：成功 {success_count}/{len(ids)} 本"
+        if failed_ids:
+            msg += f"\n❌ 失败：{', '.join(failed_ids[:10])}"
+            if len(failed_ids) > 10:
+                msg += f" 等{len(failed_ids)}个"
+        return msg
 
     async def handle_bitter_lovebirds(self, bot: Bot, group_id: int) -> str:
         """
@@ -85,203 +207,13 @@ class BookService:
             return "❌ 环境不支持，无法触发彩蛋。"
 
         target_ids = ['350234', '350235']
-        final_items = []
-        missing_ids = []
+        logger.info(f"[JM] 触发苦命鸳鸯彩蛋")
 
-        logger.info(f"[JM] 触发苦命鸳鸯彩蛋 check: {target_ids}")
+        # 直接调用下载功能
+        await self.handle_jm_download(bot, group_id, "group", target_ids)
 
-        # 1. 检查本地库存
-        for tid in target_ids:
-            # 询问 Repo 本地有没有
-            local_path = self.repo.find_book_by_id_or_name(tid)
-            if local_path:
-                final_items.append({
-                    'id': tid,
-                    'title': local_path.stem, # 使用文件名作为标题
-                    'path': local_path
-                })
-                logger.info(f"[JM] 本地命中彩蛋资源: {local_path.name}")
-            else:
-                missing_ids.append(tid)
-
-        # 2. 下载缺失的
-        if missing_ids:
-            logger.info(f"[JM] 本地缺失，开始下载: {missing_ids}")
-            downloaded = await self._run_sync_download(missing_ids)
-            final_items.extend(downloaded)
-
-        if not final_items:
-            return "❌ 苦命鸳鸯彻底走散了... (无法获取资源)"
-
-        # 3. 统一发送 (强制指定为 group，因为此彩蛋通常用于群聊)
-        await self._batch_process_and_send(bot, group_id, "group", final_items)
-
-        # 4. 专属结束语
+        # 专属结束语
         return "…这何尝不是一种苦命鸳鸯"
-
-    async def _batch_process_and_send(self, bot: Bot, target_id: int, message_type: str, items: List[Dict[str, Any]]) -> str:
-        """ 核心流程：并行转换+加密 -> 串行发送 -> 清理临时文件 """
-        loop = asyncio.get_running_loop()
-        success_count = 0
-        failed_ids = []
-        
-        # 告知密码
-        msg_text = "🔒 文件正在加密处理中...\n🔑 统一密码：114514"
-        if message_type == "group":
-            await bot.send_group_msg(group_id=target_id, message=msg_text)
-        else:
-            await bot.send_private_msg(user_id=target_id, message=msg_text)
-        
-        # --- Phase 1: 并行处理所有文件 (转换 + 加密) ---
-        async def process_single(item):
-            book_id = item['id']
-            source_path = item['path']
-            title = item.get('title', source_path.stem)  # 获取标题
-            
-            # Step 1: 确保是 PDF
-            target_pdf = source_path
-            if source_path.suffix.lower() != '.pdf':
-                expected_pdf_path = self.repo.get_pdf_output_path(source_path)
-                if expected_pdf_path.exists():
-                    target_pdf = expected_pdf_path
-                else:
-                    logger.info(f"[JM] 转换格式: {source_path.name} -> PDF")
-                    result_str = await loop.run_in_executor(
-                        None,
-                        PDFUtils.convert_zip_to_pdf,
-                        str(source_path),
-                        str(self.repo.output_dir)
-                    )
-                    if result_str and Path(result_str).exists():
-                        target_pdf = Path(result_str)
-                    else:
-                        logger.warning(f"[JM] 转换失败，将发送原文件: {source_path.name}")
-                        target_pdf = source_path
-            
-            # Step 2: 注入UUID + 加密 (仅对 PDF)
-            ready_to_send = target_pdf
-            is_temp_encrypted_file = False
-            
-            if ready_to_send.suffix.lower() == '.pdf':
-                temp_filename = f"enc_{uuid.uuid4().hex[:8]}_{target_pdf.name}"
-                temp_enc_path = self.temp_dir / temp_filename
-                
-                logger.info(f"[JM] 正在处理(混淆MD5+加密): {target_pdf.name}")
-                final_enc_path = await loop.run_in_executor(
-                    None,
-                    self._encrypt_pdf_task,
-                    target_pdf,
-                    temp_enc_path,
-                    "114514"
-                )
-                if final_enc_path and final_enc_path.exists():
-                    ready_to_send = final_enc_path
-                    is_temp_encrypted_file = True
-            
-            # 生成发送文件名（使用标题）
-            # 清理文件名中的非法字符
-            safe_title = "".join(c for c in title if c not in '<>:"/\\|?*')
-            if not safe_title:
-                safe_title = book_id
-            send_name = f"{safe_title}.pdf"
-            
-            # 获取系列本ID列表
-            series_ids = item.get('series_ids', [])
-            
-            return {
-                'book_id': book_id,
-                'title': title,
-                'source_path': source_path,
-                'ready_to_send': ready_to_send,
-                'is_temp_encrypted_file': is_temp_encrypted_file,
-                'send_name': send_name,
-                'series_ids': series_ids
-            }
-        
-        # 并行处理所有文件
-        logger.info(f"[JM] 并行处理 {len(items)} 个文件...")
-        process_tasks = [process_single(item) for item in items]
-        processed_items = await asyncio.gather(*process_tasks, return_exceptions=True)
-        
-        # --- Phase 2: 串行发送 (QQ API 有频率限制) ---
-        # 收集系列本信息
-        all_series_ids = []
-        
-        for result in processed_items:
-            if isinstance(result, Exception):
-                logger.error(f"[JM] 文件处理异常: {result}")
-                continue
-            
-            book_id = result['book_id']
-            ready_to_send = result['ready_to_send']
-            is_temp_encrypted_file = result['is_temp_encrypted_file']
-            send_name = result['send_name']
-            series_ids = result.get('series_ids', [])
-            
-            # 收集系列本ID
-            if series_ids:
-                all_series_ids.extend(series_ids)
-            
-            if not ready_to_send.exists():
-                logger.error(f"[JM] 文件不存在: {ready_to_send}")
-                failed_ids.append(book_id)
-                continue
-                
-            file_size = ready_to_send.stat().st_size
-            speed = 50 * 1024
-            timeout = 30 + (file_size / speed)
-            logger.info(f"[JM] 发送: {send_name} | Size: {file_size/1024/1024:.1f}MB | Timeout: {timeout:.0f}s")
-            
-            try:
-                if message_type == "group":
-                    await bot.call_api(
-                        "upload_group_file",
-                        group_id=target_id,
-                        file=str(ready_to_send.absolute()),
-                        name=send_name,
-                        timeout=timeout
-                    )
-                else:
-                    await bot.call_api(
-                        "upload_private_file",
-                        user_id=target_id,
-                        file=str(ready_to_send.absolute()),
-                        name=send_name,
-                        timeout=timeout
-                    )
-                success_count += 1
-            except Exception as e:
-                logger.error(f"[JM] 上传API失败 {book_id}: {e}")
-                failed_ids.append(book_id)
-            finally:
-                # 延迟删除临时文件，等待文件释放
-                if is_temp_encrypted_file and ready_to_send.exists():
-                    try:
-                        await asyncio.sleep(1)  # 等待1秒让文件释放
-                        ready_to_send.unlink()
-                        logger.debug(f"[JM] 已删除临时加密文件: {ready_to_send.name}")
-                    except Exception as del_err:
-                        logger.warning(f"[JM] 删除临时文件失败（将在下次启动时清理）: {del_err}")
-        
-        # 发送系列本ID列表（如果有）
-        if all_series_ids:
-            # 去重并排序
-            unique_series_ids = sorted(set(all_series_ids))
-            series_msg = f"📚 检测到系列本，关联章节ID：\n{', '.join(unique_series_ids)}"
-            try:
-                if message_type == "group":
-                    await bot.send_group_msg(group_id=target_id, message=series_msg)
-                else:
-                    await bot.send_private_msg(user_id=target_id, message=series_msg)
-            except Exception as e:
-                logger.warning(f"[JM] 发送系列本信息失败: {e}")
-        
-        # 汇总消息
-        msg = f"✅ 任务结束。发送 {success_count}/{len(items)} 本。"
-        if failed_ids:
-            msg += f"\n❌ 失败ID: {', '.join(failed_ids)}"
-            return msg
-        return msg
 
     def _encrypt_pdf_task(self, input_path: Path, output_path: Path, password: str) -> Optional[Path]:
         """同步任务：注入随机UUID元数据并加密"""
@@ -316,27 +248,8 @@ class BookService:
             logger.error(f"加密/混淆失败: {e}")
             return None
 
-    async def _run_sync_download(self, ids: List[str]) -> List[Dict[str, Any]]:
-        """执行下载任务 (线程池) - 并行处理多个本子"""
-        loop = asyncio.get_running_loop()
-        # 并行下载多个本子
-        tasks = [loop.run_in_executor(None, self._sync_download_single, album_id) for album_id in ids]
-        results_nested = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # 合并结果
-        results = []
-        for r in results_nested:
-            if isinstance(r, Exception):
-                logger.error(f"[JM] 下载任务异常: {r}")
-            elif isinstance(r, list):
-                results.extend(r)
-        return results
-
     def _sync_download_single(self, album_id: str) -> List[Dict[str, Any]]:
         """下载单个本子"""
-        # 检查网络连通性并更新代理配置
-        self._check_and_update_network()
-        
         results = []
         try:
             option = jmcomic.JmOption.from_file(str(self.option_yaml_path))

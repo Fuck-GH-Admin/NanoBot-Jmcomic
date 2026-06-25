@@ -53,55 +53,66 @@ pip install requests
 
 ## 配置说明
 
-### .env（NoneBot2配置）
+**重要：配置文件不会被git跟踪，需要手动创建！**
+
+### 1. 复制示例配置文件
+
+```bash
+cp .env.example .env
+cp option.yml.example option.yml
+cp config_bot_base.yaml.example config_bot_base.yaml
+```
+
+### 2. 修改配置文件
+
+#### .env（NoneBot2配置）
 
 ```ini
-SUPERUSERS=["你的QQ号"]
-NICKNAME=["机器人昵称"]
+SUPERUSERS=["你的QQ号"]          # 替换为你的QQ号
+NICKNAME=["机器人昵称"]          # 替换为机器人昵称
 COMMAND_START=["/", ""]
 DRIVER=~fastapi
 HOST=127.0.0.1
 PORT=8080
-ONEBOT_V11_ACCESS_TOKEN="你的Token"
+ONEBOT_V11_ACCESS_TOKEN="你的Token"  # 替换为你的Token
 LOG_LEVEL=DEBUG
+API_TIMEOUT=60.0
 ```
 
-### option.yml（jmcomic下载配置）
+#### option.yml（jmcomic下载配置）
 
+需要修改的字段：
 ```yaml
-client:
-  domain:
-    api:
-      - www.cdnhth.club
-      - www.cdngwc.cc
-  impl: api
-  postman:
-    meta_data:
-      headers:
-        User-Agent: Mozilla/5.0 ...
-    type: curl_cffi
-  retry_times: 5
-  timeout: 30
-
 dir_rule:
-  base_dir: D:\文件\学习资料\本  # 本子保存目录
-  rule: Bd / {Aid}_{Pid}_{Pindex}_{Ptitle}
+  base_dir: D:\你的路径\本子保存目录  # 修改为你的本子保存目录
 
-download:
-  image:
-    decode: true
-    suffix: .png
-  threading:
-    image: 20
+plugins:
+  config:
+    save_path: D:\你的路径\日志目录    # 修改为你的日志目录
 ```
 
-### config_bot_base.yaml（业务配置）
+#### config_bot_base.yaml（业务配置）
 
 ```yaml
-jm_download_dir: data/jm_temp     # 临时下载目录
-jm_option_path: option.yml        # jmcomic配置路径
-books_folder: D:\文件\学习资料\本  # 本子保存目录
+jm_download_dir: data/jm_temp
+jm_option_path: option.yml
+books_folder: D:\你的路径\本子保存目录  # 与option.yml的base_dir保持一致
 font_path: C:\Windows\Fonts\msyh.ttc
+```
+
+### 配置示例
+
+假设你要把本子保存到 `D:\JM\downloads` 目录：
+
+**option.yml:**
+```yaml
+dir_rule:
+  base_dir: D:\JM\downloads
+```
+
+**config_bot_base.yaml:**
+```yaml
+books_folder: D:\JM\downloads
 ```
 
 ## 使用方法

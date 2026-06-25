@@ -1,6 +1,6 @@
-# Jmbot - 禁漫下载QQ机器人
+# NanoBot-Jmcomic - 禁漫下载QQ机器人
 
-基于 NoneBot2 + jmcomic 库的禁漫下载QQ机器人插件。
+基于 [NoneBot2](https://github.com/nonebot/nonebot2) + [jmcomic](https://github.com/hect0x7/JMComic-Crawler-Python/) 的禁漫下载QQ机器人插件，使用 [LLOneBot](https://github.com/LLOneBot/LLOneBot) 作为QQ机器人框架。
 
 ## ⚠️ 注意
 

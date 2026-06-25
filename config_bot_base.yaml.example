@@ -1,0 +1,13 @@
+# config_bot_base.yaml - 机器人业务配置
+
+# JM临时下载目录（会自动创建和清理）
+jm_download_dir: data/jm_temp
+
+# jmcomic配置文件路径
+jm_option_path: option.yml
+
+# 本子最终保存目录（修改为你的路径，与option.yml中的base_dir一致）
+books_folder: D:\你的路径\本子保存目录
+
+# 字体路径（用于PDF处理，一般不需要修改）
+font_path: C:\Windows\Fonts\msyh.ttc

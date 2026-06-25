@@ -1,0 +1,61 @@
+# option.yml - jmcomic下载配置
+client:
+  cache: null  
+  domain: 
+    html:
+      - 18comic.vip
+      - 18comic.org
+      - jmcomic.me
+      - jmcomic1.me
+      - jm-comic.cloud
+    api:
+      - www.cdnhth.club
+      - www.cdngwc.cc
+      - www.cdnhth.net
+      - www.cdnbea.net
+      - www.cdn-mspjmapiproxy.xyz
+  impl: api
+  postman:
+    meta_data:
+      headers:
+        User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36
+        Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8
+        Accept-Language: zh-CN,zh;q=0.9,en;q=0.8
+        Referer: https://18comic.vip/
+        Accept-Encoding: gzip, deflate
+      impersonate: chrome
+      # 代理配置（可选，如果裸连可用可注释掉）
+      # proxies:
+      #   http: 127.0.0.1:7890
+      #   https: 127.0.0.1:7890
+    type: curl_cffi
+  retry_times: 5
+  timeout: 30
+
+dir_rule:
+  # 本子保存目录（修改为你的路径）
+  base_dir: D:\你的路径\本子保存目录
+  normalize_zh: true
+  rule: Bd / {Aid}_{Pid}_{Pindex}_{Ptitle}
+
+download:
+  cache: true
+  image:
+    decode: true
+    suffix: .png
+    quality: 100 
+  threading:
+    image: 20
+    photo: 4
+  retry_times: 3
+  timeout: 60
+
+log: true
+plugins:
+  valid: log,debug
+  config:
+    log_level: INFO
+    # 日志保存路径（修改为你的路径）
+    save_path: D:\你的路径\日志目录
+
+version: '2.1'

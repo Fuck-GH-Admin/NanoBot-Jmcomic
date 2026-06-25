@@ -34,3 +34,14 @@ test_*.py
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 项目特定文件
+src.zip
+src/config - 副本.py
+src/plugins/packed_for_ai1/
+src/plugins/合并.py
+
+# 本地配置（不覆盖）
+.env
+config_bot_base.yaml
+option.yml

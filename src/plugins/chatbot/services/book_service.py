@@ -68,9 +68,6 @@ class BookService:
         
         logger.info(f"[JM] 开始下载任务: {len(ids)}个本子")
         
-        # 先检查一次网络
-        self._check_and_update_network()
-        
         # 发送处理中消息
         msg_text = f"⏳ 开始处理 {len(ids)} 个本子...\n🔒 加密密码：114514"
         if message_type == "group":

@@ -29,6 +29,11 @@ class BookRepository:
         
         self._ensure_dirs()
 
+    def refresh(self):
+        self.books_dir = Path(plugin_config.books_folder)
+        self.output_dir = self.books_dir / "output"
+        self._ensure_dirs()
+
     def _ensure_dirs(self):
         if not self.books_dir.exists():
             logger.warning(f"[BookRepo] Books folder created: {self.books_dir}")

@@ -1,6 +1,6 @@
 import re
 import asyncio
-import uuid
+import time
 from nonebot import on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 from nonebot.params import EventPlainText
@@ -9,20 +9,26 @@ from nonebot.exception import FinishedException
 
 from ..services import book_srv, perm_srv
 from ..models import TaskResult
+from ..utils.string_utils import StringUtils
 
 
-GROUP_LIMIT_PER_MINUTE = 1
-_group_usage: dict = {}
+USER_LIMIT_PER_MINUTE = 1
+_user_usage: dict = {}
 
 
-def _check_rate_limit(group_id: str) -> bool:
-    import time
+def _check_rate_limit(user_id: str) -> bool:
     now = time.time()
-    last = _group_usage.get(group_id, 0)
+    last = _user_usage.get(user_id, 0)
     if now - last < 60:
         return False
-    _group_usage[group_id] = now
+    _user_usage[user_id] = now
     return True
+
+
+def _rate_limit_remaining(user_id: str) -> int:
+    last = _user_usage.get(user_id, 0)
+    remaining = int(60 - (time.time() - last))
+    return max(0, remaining)
 
 
 group_chat = on_message(priority=10, block=False)
@@ -43,10 +49,21 @@ async def handle_group_chat(bot: Bot, event: GroupMessageEvent, text: str = Even
     text = re.sub(r'\[CQ:at,qq=\d+\]\s*', '', text).strip()
     logger.info(f"[JM] 群消息: User:{user_id} Group:{group_id} | {text}")
 
+    if re.match(r'^/?jm\s*(帮助|help|\?)?$', text, re.IGNORECASE):
+        await group_chat.finish(
+            "📖 JM 下载帮助\n"
+            f"  /jm <ID>    下载本子\n"
+            f"  /jm <ID1 ID2>  批量下载\n"
+            f"  苦命鸳鸯    触发彩蛋\n"
+            f"🔒 加密密码：{__import__('src.plugins.chatbot.config', fromlist=['plugin_config']).plugin_config.encrypt_password}"
+        )
+        return
+
     if "苦命鸳鸯" in text:
         try:
-            if not _check_rate_limit(group_id):
-                await group_chat.finish("⏳ 操作过于频繁，请稍后重试")
+            if not _check_rate_limit(user_id):
+                sec = _rate_limit_remaining(user_id)
+                await group_chat.finish(f"⏳ 操作过于频繁，请 {sec} 秒后重试")
             results = await _run_download_with_progress(bot, group_id, "group",
                 lambda p: _send_progress(bot, group_id, "group", p),
                 bitter_lovebirds=True)
@@ -65,8 +82,9 @@ async def handle_group_chat(bot: Bot, event: GroupMessageEvent, text: str = Even
     if jm_match:
         ids = re.findall(r'\d+', jm_match.group(1))
         if ids:
-            if not _check_rate_limit(group_id):
-                await group_chat.finish("⏳ 操作过于频繁，请稍后重试")
+            if not _check_rate_limit(user_id):
+                sec = _rate_limit_remaining(user_id)
+                await group_chat.finish(f"⏳ 操作过于频繁，请 {sec} 秒后重试")
             await group_chat.send(f"⏳ 正在调度下载任务: {ids}")
             try:
                 results = await _run_download_with_progress(bot, group_id, "group",
@@ -105,6 +123,15 @@ async def _run_download_with_progress(
     return await book_srv.process_download(ids or [], progress=progress_cb)
 
 
+async def _cleanup_result(result: TaskResult):
+    for p in result.cleanup_paths:
+        if p and p.exists():
+            try:
+                p.unlink()
+            except Exception:
+                pass
+
+
 async def _send_results(bot: Bot, target: int, mtype: str, results: list):
     series_ids_all = []
     send_tasks = []
@@ -116,6 +143,10 @@ async def _send_results(bot: Bot, target: int, mtype: str, results: list):
 
     if send_tasks:
         await asyncio.gather(*send_tasks)
+
+    for r in results:
+        if r.success:
+            await _cleanup_result(r)
 
     if series_ids_all:
         unique = sorted(set(series_ids_all))
@@ -146,7 +177,7 @@ async def _send_results(bot: Bot, target: int, mtype: str, results: list):
 
 
 async def _upload_file(bot: Bot, target: int, mtype: str, result: TaskResult):
-    safe_title = _sanitize(result.title) or result.album_id
+    safe_title = StringUtils.sanitize_filename(result.title) or result.album_id
     send_name = f"{safe_title}.pdf"
     fp = result.file_path
     if not fp or not fp.exists():
@@ -163,7 +194,3 @@ async def _upload_file(bot: Bot, target: int, mtype: str, result: TaskResult):
         except Exception as e:
             logger.warning(f"[JM] 发送重试 {retry+1}/2: {e}")
             await asyncio.sleep(2)
-
-
-def _sanitize(name: str) -> str:
-    return "".join(c for c in name if c not in '<>:"/\\|?*')

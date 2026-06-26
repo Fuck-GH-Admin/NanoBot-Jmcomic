@@ -1,5 +1,6 @@
 import os
 import asyncio
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -9,6 +10,7 @@ from ..config import plugin_config
 from ..models import TaskResult, ProgressCallback
 from ..repositories.book_repo import BookRepository
 from ..utils.network_utils import NetworkUtils
+from ..utils.string_utils import StringUtils
 from .downloader import JmDownloader, JmOptionCache
 from .converter import PDFConverter, PDFEncryptor
 
@@ -18,18 +20,15 @@ except ImportError:
     jmcomic = None
 
 
-def _sanitize_filename(name: str) -> str:
-    return "".join(c for c in name if c not in '<>:"/\\|?*') or "untitled"
-
-
 class BookService:
     def __init__(self):
         self.repo = BookRepository()
         self.temp_dir = Path(plugin_config.jm_download_dir)
         self.option_path = Path(plugin_config.jm_option_path)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
-        self._network_checked = False
-        self.dl = JmDownloader(self.temp_dir, self.option_path)
+        self._last_network_check = 0.0
+        self._network_msg = ""
+        self.dl = JmDownloader(self.temp_dir, self.option_path, self.repo.books_dir)
         self.download_timeout = 300
         self.convert_timeout = 300
 
@@ -37,24 +36,26 @@ class BookService:
         return (jmcomic is not None) and self.option_path.exists()
 
     def check_network(self) -> str:
-        if self._network_checked:
-            return ""
+        now = time.time()
+        if now - self._last_network_check < 300:
+            return self._network_msg
+        self._last_network_check = now
         if NetworkUtils.test_connectivity(timeout=3):
-            self._network_checked = True
             NetworkUtils.update_option_proxy(str(self.option_path), enable_proxy=False)
-            return "🌐 网络：直连模式"
-        if NetworkUtils.test_proxy_connectivity("http://127.0.0.1:7890", timeout=3):
-            self._network_checked = True
+            self._network_msg = "🌐 网络：直连模式"
+        elif NetworkUtils.test_proxy_connectivity("http://127.0.0.1:7890", timeout=3):
             NetworkUtils.update_option_proxy(str(self.option_path), enable_proxy=True)
-            return "🌐 网络：代理模式 (127.0.0.1:7890)"
-        self._network_checked = True
-        return "🌐 网络：不可用，下载可能失败"
+            self._network_msg = "🌐 网络：代理模式 (127.0.0.1:7890)"
+        else:
+            self._network_msg = "🌐 网络：不可用，下载可能失败"
+        return self._network_msg
 
     def refresh_paths(self):
+        self.repo.refresh()
         self.temp_dir = Path(plugin_config.jm_download_dir)
         self.option_path = Path(plugin_config.jm_option_path)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
-        self.dl = JmDownloader(self.temp_dir, self.option_path)
+        self.dl = JmDownloader(self.temp_dir, self.option_path, self.repo.books_dir)
         JmOptionCache.invalidate()
 
     async def process_download(
@@ -70,21 +71,19 @@ class BookService:
         loop = asyncio.get_running_loop()
         semaphore = asyncio.Semaphore(3)
 
+        password = plugin_config.encrypt_password
         if progress:
-            await progress(f"⏳ 开始处理 {len(ids)} 个本子...\n🔒 加密密码：114514")
+            await progress(f"⏳ 开始处理 {len(ids)} 个本子...\n🔒 加密密码：{password}")
 
         net_msg = await loop.run_in_executor(None, self.check_network)
         if net_msg and progress:
             await progress(net_msg)
 
         results: List[TaskResult] = []
-        done_ids = set()
 
         async def process_one(aid: str):
             async with semaphore:
                 try:
-                    if progress:
-                        await progress(f"📥 正在下载 [{aid}]...")
                     items = await asyncio.wait_for(
                         loop.run_in_executor(None, self.dl.download_album, aid),
                         timeout=self.download_timeout,
@@ -103,8 +102,6 @@ class BookService:
                             results.append(TaskResult(aid, title, False, error_msg="文件过小，视为无效"))
                             continue
 
-                        if progress:
-                            await progress(f"🔄 正在转换PDF [{title}]...")
                         pdf = await asyncio.wait_for(
                             loop.run_in_executor(None, PDFConverter.convert_zip, source, self.repo.output_dir),
                             timeout=self.convert_timeout,
@@ -113,13 +110,17 @@ class BookService:
                             results.append(TaskResult(aid, title, False, error_msg="PDF转换失败"))
                             continue
 
-                        if progress:
-                            await progress(f"🔒 正在加密 [{title}]...")
                         enc = await asyncio.wait_for(
-                            loop.run_in_executor(None, PDFEncryptor.encrypt, pdf, self.temp_dir),
+                            loop.run_in_executor(None, PDFEncryptor.encrypt, pdf, self.temp_dir, password),
                             timeout=120,
                         )
                         send_path = enc if (enc and enc.exists()) else pdf
+
+                        cleanup = []
+                        if enc and enc.exists():
+                            cleanup.append(enc)
+                        if pdf and pdf.parent == self.repo.output_dir:
+                            pass  # keep unencrypted PDF as cache
 
                         results.append(TaskResult(
                             album_id=aid,
@@ -127,9 +128,10 @@ class BookService:
                             success=True,
                             file_path=send_path,
                             series_ids=sids,
+                            cleanup_paths=cleanup,
                         ))
                         if progress:
-                            await progress(f"✅ [{title}] 处理完成，准备发送")
+                            await progress(f"✅ [{title}] 处理完成")
 
                 except asyncio.TimeoutError:
                     logger.exception(f"[JM] 超时 {aid}")
@@ -137,8 +139,6 @@ class BookService:
                 except Exception:
                     logger.exception(f"[JM] 处理失败 {aid}")
                     results.append(TaskResult(aid, aid, False, error_msg="处理异常"))
-                finally:
-                    done_ids.add(aid)
 
         tasks = [process_one(aid) for aid in ids]
         await asyncio.gather(*tasks)

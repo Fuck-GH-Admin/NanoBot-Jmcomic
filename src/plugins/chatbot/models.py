@@ -11,6 +11,7 @@ class TaskResult:
     file_path: Optional[Path] = None
     series_ids: List[str] = field(default_factory=list)
     error_msg: str = ""
+    cleanup_paths: List[Path] = field(default_factory=list)
 
 
 ProgressCallback = Callable[[str], Awaitable[None]]

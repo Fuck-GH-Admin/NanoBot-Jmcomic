@@ -22,6 +22,9 @@ class Config(BaseSettings):
     jm_option_path: str = r"option.yml"
     books_folder: str = r"D:\文件\学习资料\本"
 
+    # 加密密码
+    encrypt_password: str = "114514"
+
     # 权限集合
     superusers: Set[str] = set()
     private_whitelist: Set[str] = set()
@@ -91,6 +94,7 @@ class ConfigManager:
             "jm_download_dir": "data/jm_temp",
             "jm_option_path": "data/option.yml",
             "books_folder": r"D:\文件\学习资料\本",
+            "encrypt_password": "114514",
             "superusers": [],
             "private_whitelist": [],
             "group_whitelist": [],

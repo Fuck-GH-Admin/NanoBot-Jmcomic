@@ -1,35 +1,41 @@
 import re
 import asyncio
+import time
 from nonebot import on_message
+from nonebot.rule import Rule
 from nonebot.adapters.onebot.v11 import Bot, PrivateMessageEvent
 from nonebot.params import EventPlainText
-from nonebot.rule import Rule
 from nonebot.log import logger
 from nonebot.exception import FinishedException
 
 from ..services import book_srv, perm_srv
 from ..models import TaskResult
+from ..utils.string_utils import StringUtils
 
 from .group_chat import _run_download_with_progress, _send_results, _send_progress
 
 
-PRIVATE_LIMIT_PER_MINUTE = 1
-_private_usage: dict = {}
+USER_LIMIT_PER_MINUTE = 1
+_user_usage: dict = {}
 
 
 def _check_rate_limit(user_id: str) -> bool:
-    import time
     now = time.time()
-    last = _private_usage.get(user_id, 0)
+    last = _user_usage.get(user_id, 0)
     if now - last < 60:
         return False
-    _private_usage[user_id] = now
+    _user_usage[user_id] = now
     return True
+
+
+def _rate_limit_remaining(user_id: str) -> int:
+    last = _user_usage.get(user_id, 0)
+    remaining = int(60 - (time.time() - last))
+    return max(0, remaining)
 
 
 async def _is_private(event: PrivateMessageEvent) -> bool:
     return True
-
 
 private_chat = on_message(rule=Rule(_is_private), priority=1, block=True)
 
@@ -49,13 +55,25 @@ async def handle_private(bot: Bot, event: PrivateMessageEvent, text: str = Event
 
     logger.info(f"[JM] 私聊: User:{user_id} | {text}")
 
+    if re.match(r'^(/jm|jm|帮助|help|\?)$', text.strip(), re.IGNORECASE):
+        from ..config import plugin_config
+        await private_chat.finish(
+            "📖 JM 下载帮助\n"
+            f"  /jm <ID>       下载本子\n"
+            f"  /jm <ID1 ID2>  批量下载\n"
+            f"  苦命鸳鸯       触发彩蛋\n"
+            f"🔒 加密密码：{plugin_config.encrypt_password}"
+        )
+        return
+
     jm_pattern = r'(?:^/jm|^jm|^下载本子|^禁漫)\s*(\d[\d\s]*)'
     match = re.match(jm_pattern, text, re.IGNORECASE)
     if match:
         ids = re.findall(r'\d+', match.group(1))
         if ids:
             if not _check_rate_limit(user_id):
-                await private_chat.finish("⏳ 操作过于频繁，请稍后重试")
+                sec = _rate_limit_remaining(user_id)
+                await private_chat.finish(f"⏳ 操作过于频繁，请 {sec} 秒后重试")
             await private_chat.send(f"⏳ [私聊] 正在调度下载任务: {ids}")
             try:
                 results = await _run_download_with_progress(bot, user_id, "private",

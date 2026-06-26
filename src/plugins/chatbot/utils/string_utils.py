@@ -73,6 +73,10 @@ class StringUtils:
         return StringUtils.levenshtein_distance(clean_text, clean_keyword) <= threshold
 
     @staticmethod
+    def sanitize_filename(name: str) -> str:
+        return "".join(c for c in name if c not in '<>:"/\\|?*')
+
+    @staticmethod
     def contains_all_chars(text: str, keyword: str) -> bool:
         """
         检查 text 是否包含 keyword 中的所有字符（顺序不限）

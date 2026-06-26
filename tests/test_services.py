@@ -86,7 +86,7 @@ class TestJmDownloader:
             ch_dir = Path("/tmp/350234_テスト")
             ch_dir.mkdir(parents=True, exist_ok=True)
 
-            dl = JmDownloader(Path("/tmp"), Path("option.yml"))
+            dl = JmDownloader(Path("/tmp"), Path("option.yml"), Path("/tmp"))
             result = dl.download_album("350234")
 
             assert len(result) > 0

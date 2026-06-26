@@ -30,9 +30,10 @@ class JmOptionCache:
 
 
 class JmDownloader:
-    def __init__(self, temp_dir: Path, option_path: Path):
+    def __init__(self, temp_dir: Path, option_path: Path, books_dir: Path):
         self.temp_dir = temp_dir
         self.option_path = option_path
+        self.books_dir = books_dir
 
     def download_album(self, album_id: str) -> List[Dict[str, Any]]:
         import jmcomic
@@ -70,8 +71,7 @@ class JmDownloader:
 
             for c_dir in chapter_dirs:
                 c_name = os.path.basename(c_dir)
-                zip_path = self.temp_dir.parent / "books" / f"{c_name}.zip"
-                zip_path.parent.mkdir(parents=True, exist_ok=True)
+                zip_path = self.books_dir / f"{c_name}.zip"
 
                 if not zip_path.exists():
                     self._zip_folder(c_dir, zip_path)

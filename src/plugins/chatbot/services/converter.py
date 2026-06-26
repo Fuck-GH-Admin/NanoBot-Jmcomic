@@ -17,9 +17,8 @@ class PDFConverter:
     def convert_zip(input_zip: Path, output_dir: Path) -> Optional[Path]:
         if input_zip.suffix.lower() == '.pdf':
             return input_zip
-        expected = output_dir / f"{input_zip.stem}.pdf"
-        if expected.exists():
-            return expected
+        safe_name = f"{uuid.uuid4().hex[:8]}_{input_zip.stem}"
+        out_path = output_dir / f"{safe_name}.pdf"
         result = PDFUtils.convert_zip_to_pdf(str(input_zip), str(output_dir))
         if result and Path(result).exists():
             return Path(result)

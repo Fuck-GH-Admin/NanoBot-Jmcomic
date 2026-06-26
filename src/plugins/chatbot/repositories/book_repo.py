@@ -54,13 +54,15 @@ class BookRepository:
 
     def find_book_by_id_or_name(self, keyword: str) -> Optional[Path]:
         """
-        尝试在本地查找包含特定 ID 或关键词的书籍
+        精确查找本地书籍
+        匹配规则：文件名去除后缀后，等于 keyword 或以 "{keyword}_" 开头
+        避免子串碰撞（如 ID 1 误匹配 350234）
         """
         books = self.get_all_books()
-        keyword = str(keyword).lower()
+        kw = str(keyword).lower()
         for b in books:
-            # 匹配文件名 (包含ID或名称)
-            if keyword in b.name.lower():
+            stem = b.stem.lower()
+            if stem == kw or stem.startswith(kw + '_'):
                 return b
         return None
 

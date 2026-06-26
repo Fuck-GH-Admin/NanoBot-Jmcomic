@@ -17,7 +17,6 @@ config = {
     "jm_download_dir": f"{_test_tmp_dir}/data/jm_temp",
     "jm_option_path": f"{_test_tmp_dir}/option.yml",
     "books_folder": f"{_test_tmp_dir}/books",
-    "font_path": "C:\\Windows\\Fonts\\msyh.ttc",
     "superusers": ["123456", "789012"]
 }
 with open(f"{_test_tmp_dir}/config_bot_base.yaml", "w", encoding="utf-8") as f:

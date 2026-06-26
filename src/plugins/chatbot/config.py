@@ -21,10 +21,11 @@ class Config(BaseSettings):
     jm_download_dir: str = r"data/jm_temp"
     jm_option_path: str = r"option.yml"
     books_folder: str = r"D:\文件\学习资料\本"
-    font_path: str = r"C:\Windows\Fonts\msyh.ttc"
 
-    # 权限集合（保留超级用户配置，用于权限控制）
+    # 权限集合
     superusers: Set[str] = set()
+    private_whitelist: Set[str] = set()
+    group_whitelist: Set[str] = set()
 
 
 class ConfigManager:
@@ -80,8 +81,9 @@ class ConfigManager:
             "jm_download_dir": "data/jm_temp",
             "jm_option_path": "data/option.yml",
             "books_folder": r"D:\文件\学习资料\本",
-            "font_path": r"C:\Windows\Fonts\msyh.ttc",
-            "superusers": []
+            "superusers": [],
+            "private_whitelist": [],
+            "group_whitelist": [],
         }
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             yaml.dump(default, f, allow_unicode=True, default_flow_style=False)

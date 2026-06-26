@@ -7,7 +7,7 @@ from nonebot.params import EventPlainText
 from nonebot.log import logger
 from nonebot.exception import FinishedException
 
-from ..services import book_srv
+from ..services import book_srv, perm_srv
 from ..consts import JM_TRIGGERS, BITTER_LOVEBIRDS_IDS
 
 # 优先级 10
@@ -20,6 +20,11 @@ async def handle_group_chat(bot: Bot, event: GroupMessageEvent, text: str = Even
         return
 
     user_id = str(event.user_id)
+    group_id = str(event.group_id)
+    
+    # 群白名单检查
+    if not perm_srv.is_group_whitelisted(group_id):
+        return
     
     # 去掉@bot的部分（如果有）
     # OneBot V11 格式: [CQ:at,qq=xxx]
@@ -34,9 +39,9 @@ async def handle_group_chat(bot: Bot, event: GroupMessageEvent, text: str = Even
             await group_chat.finish(msg)
         except FinishedException:
             raise
-        except Exception as e:
-            logger.error(f"[JM] 苦命鸳鸯彩蛋触发失败: {e}")
-            await group_chat.finish("彩蛋触发失败 QAQ")
+        except Exception:
+            logger.exception("[JM] 苦命鸳鸯彩蛋触发失败")
+            await group_chat.finish("彩蛋触发失败，请稍后重试")
         return
 
     # 3. 严格匹配 /jm 指令（不区分大小写）
@@ -57,9 +62,9 @@ async def handle_group_chat(bot: Bot, event: GroupMessageEvent, text: str = Even
                 await group_chat.finish(res)
             except FinishedException:
                 raise
-            except Exception as e:
-                logger.error(f"[JM] 下载任务执行失败: {e}")
-                await group_chat.finish(f"下载任务执行失败: {str(e)}")
+            except Exception:
+                logger.exception("[JM] 下载任务执行失败")
+                await group_chat.finish("下载任务执行失败，请稍后重试或检查网络")
         else:
             await group_chat.finish("没有识别到有效的数字ID哦")
         return

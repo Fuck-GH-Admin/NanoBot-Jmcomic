@@ -49,6 +49,11 @@ class BookService:
         # 网络状态跟踪
         self._network_checked = False
         self._need_proxy = False
+        
+        # 超时配置（秒）
+        self.download_timeout = 300
+        self.convert_timeout = 300
+        self.encrypt_timeout = 120
 
     async def handle_jm_download(self, bot: Bot, target_id: int, message_type: str, ids: List[str]) -> str:
         """
@@ -69,8 +74,14 @@ class BookService:
         
         logger.info(f"[JM] 开始下载任务: {len(ids)}个本子")
         
+        # 网络自适应检测
+        loop = asyncio.get_running_loop()
+        network_msg = await loop.run_in_executor(None, self._check_and_update_network)
+        
         # 发送处理中消息
         msg_text = f"⏳ 开始处理 {len(ids)} 个本子...\n🔒 加密密码：114514"
+        if network_msg:
+            msg_text += f"\n{network_msg}"
         if message_type == "group":
             await bot.send_group_msg(group_id=target_id, message=msg_text)
         else:
@@ -78,7 +89,6 @@ class BookService:
         
         # 并发限制为3
         semaphore = asyncio.Semaphore(3)
-        loop = asyncio.get_running_loop()
         success_count = 0
         failed_ids = []
         series_ids_all = []
@@ -89,8 +99,11 @@ class BookService:
             
             async with semaphore:
                 try:
-                    # 1. 下载（在线程池中执行）
-                    items = await loop.run_in_executor(None, self._sync_download_single, album_id)
+                    # 1. 下载（在线程池中执行，超时熔断）
+                    items = await asyncio.wait_for(
+                        loop.run_in_executor(None, self._sync_download_single, album_id),
+                        timeout=self.download_timeout
+                    )
                     if not items:
                         failed_ids.append(album_id)
                         return
@@ -118,9 +131,12 @@ class BookService:
                             if expected_pdf_path.exists():
                                 target_pdf = expected_pdf_path
                             else:
-                                result_str = await loop.run_in_executor(
-                                    None, PDFUtils.convert_zip_to_pdf,
-                                    str(source_path), str(self.repo.output_dir)
+                                result_str = await asyncio.wait_for(
+                                    loop.run_in_executor(
+                                        None, PDFUtils.convert_zip_to_pdf,
+                                        str(source_path), str(self.repo.output_dir)
+                                    ),
+                                    timeout=self.convert_timeout
                                 )
                                 if result_str and Path(result_str).exists():
                                     target_pdf = Path(result_str)
@@ -130,8 +146,11 @@ class BookService:
                         is_temp = False
                         if ready_to_send.suffix.lower() == '.pdf':
                             temp_path = self.temp_dir / f"enc_{uuid.uuid4().hex[:8]}_{target_pdf.name}"
-                            enc_path = await loop.run_in_executor(
-                                None, self._encrypt_pdf_task, target_pdf, temp_path, "114514"
+                            enc_path = await asyncio.wait_for(
+                                loop.run_in_executor(
+                                    None, self._encrypt_pdf_task, target_pdf, temp_path, "114514"
+                                ),
+                                timeout=self.encrypt_timeout
                             )
                             if enc_path and enc_path.exists():
                                 ready_to_send = enc_path
@@ -171,13 +190,16 @@ class BookService:
                                 await asyncio.sleep(1)
                                 try:
                                     ready_to_send.unlink()
-                                except:
+                                except Exception:
                                     pass
                         else:
                             failed_ids.append(album_id)
                             
-                except Exception as e:
-                    logger.error(f"[JM] 处理失败 {album_id}: {e}")
+                except asyncio.TimeoutError:
+                    logger.exception(f"[JM] 处理超时 {album_id}")
+                    failed_ids.append(album_id)
+                except Exception:
+                    logger.exception(f"[JM] 处理失败 {album_id}")
                     failed_ids.append(album_id)
         
         # 并行处理所有本子
@@ -198,8 +220,8 @@ class BookService:
                     await bot.send_group_msg(group_id=target_id, message=series_msg)
                 else:
                     await bot.send_private_msg(user_id=target_id, message=series_msg)
-            except:
-                pass
+            except Exception:
+                logger.exception("[JM] 发送系列本列表失败")
         
         # 汇总
         msg = f"✅ 任务完成：成功 {success_count}/{len(ids)} 本"
@@ -259,8 +281,8 @@ class BookService:
                 writer.write(f)
                 
             return output_path
-        except Exception as e:
-            logger.error(f"加密/混淆失败: {e}")
+        except Exception:
+            logger.exception("加密/混淆失败")
             return None
 
     def _sync_download_single(self, album_id: str) -> List[Dict[str, Any]]:
@@ -276,7 +298,8 @@ class BookService:
             try:
                 album = downloader.client.get_album_detail(album_id)
                 title = album.title
-            except:
+            except Exception:
+                logger.exception(f"[JM] 获取本子详情失败 {album_id}")
                 title = f"JM_{album_id}"
             
             # 检测系列本
@@ -324,8 +347,8 @@ class BookService:
                         try:
                             shutil.rmtree(c_dir)
                             logger.info(f"[JM] ZIP打包完成，已清理源文件: {c_name}")
-                        except Exception as e:
-                            logger.warning(f"[JM] 清理源文件失败 {c_name}: {e}")
+                        except Exception:
+                            logger.exception(f"[JM] 清理源文件失败 {c_name}")
                 
                 if zip_path.exists():
                     results.append({
@@ -335,18 +358,18 @@ class BookService:
                         'series_ids': series_ids
                     })
 
-        except Exception as e:
-            logger.error(f"[JM] Item Error {album_id}: {e}")
+        except Exception:
+            logger.exception(f"[JM] Item Error {album_id}")
         
         return results
 
     def _find_chapter_dirs(self, aid: str) -> List[str]:
-        """辅助：查找临时目录下的章节文件夹"""
+        """辅助：查找临时目录下的章节文件夹（精确前缀匹配）"""
         found = []
         if self.temp_dir.exists():
             for d in os.listdir(self.temp_dir):
                 full = self.temp_dir / d
-                if str(aid) in d and full.is_dir():
+                if full.is_dir() and (d == aid or d.startswith(aid + '_')):
                     found.append(str(full))
         return found
 
@@ -359,19 +382,19 @@ class BookService:
                         p = os.path.join(root, file)
                         arcname = os.path.relpath(p, os.path.dirname(folder_path))
                         zf.write(p, arcname)
-        except Exception as e:
-            logger.error(f"ZIP Error: {e}")
+        except Exception:
+            logger.exception("ZIP打包失败")
 
     def _check_env(self) -> bool:
         return (jmcomic is not None) and self.option_yaml_path.exists()
     
-    def _check_and_update_network(self):
+    def _check_and_update_network(self) -> str:
         """
         检查网络连通性并更新代理配置
-        如果裸连可用，则禁用代理；否则启用代理
+        返回状态消息（空字符串表示无变化）
         """
         if self._network_checked:
-            return
+            return ""
         
         logger.info("[JM] 检查网络连通性...")
         
@@ -380,6 +403,8 @@ class BookService:
             logger.info("[JM] 裸连可用，禁用代理")
             self._need_proxy = False
             NetworkUtils.update_option_proxy(str(self.option_yaml_path), enable_proxy=False)
+            self._network_checked = True
+            return "🌐 网络：直连模式"
         else:
             # 2. 裸连不可用，测试代理
             logger.info("[JM] 裸连不可用，测试代理...")
@@ -387,8 +412,10 @@ class BookService:
                 logger.info("[JM] 代理可用，启用代理")
                 self._need_proxy = True
                 NetworkUtils.update_option_proxy(str(self.option_yaml_path), enable_proxy=True)
+                self._network_checked = True
+                return "🌐 网络：代理模式 (127.0.0.1:7890)"
             else:
                 logger.warning("[JM] 裸连和代理都不可用，保持当前配置")
                 self._need_proxy = False
-        
-        self._network_checked = True
+                self._network_checked = True
+                return "🌐 网络：不可用，下载可能失败"

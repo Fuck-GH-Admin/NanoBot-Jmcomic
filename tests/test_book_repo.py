@@ -46,6 +46,26 @@ class TestBookRepository:
         found = repo.find_book_by_id_or_name("hello")
         assert found is not None
 
+    def test_find_book_exact_id_without_title(self):
+        repo = BookRepository()
+        f = repo.books_dir / "350234.zip"
+        f.write_text("fake")
+        assert repo.find_book_by_id_or_name("350234") is not None
+
+    def test_find_book_does_not_match_substring(self):
+        repo = BookRepository()
+        (repo.books_dir / "350234_测试本子.zip").write_text("fake")
+        (repo.books_dir / "3502345_其他本子.zip").write_text("fake")
+        found = repo.find_book_by_id_or_name("350234")
+        assert found is not None
+        assert "3502345" not in found.name
+
+    def test_find_book_edge_id_1_does_not_match_all(self):
+        repo = BookRepository()
+        (repo.books_dir / "350234_测试本子.zip").write_text("fake")
+        (repo.books_dir / "12345_其他本子.zip").write_text("fake")
+        assert repo.find_book_by_id_or_name("1") is None
+
     def test_find_book_not_found(self):
         repo = BookRepository()
         found = repo.find_book_by_id_or_name("nonexistent")

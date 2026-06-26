@@ -9,5 +9,12 @@ jm_option_path: option.yml
 # 本子最终保存目录（修改为你的路径，与option.yml中的base_dir一致）
 books_folder: D:\你的路径\本子保存目录
 
-# 字体路径（用于PDF处理，一般不需要修改）
-font_path: C:\Windows\Fonts\msyh.ttc
+# 私聊白名单（空数组表示开放所有用户）
+# private_whitelist:
+#   - "123456789"
+#   - "987654321"
+
+# 群聊白名单（空数组表示开放所有群）
+# group_whitelist:
+#   - "123456789"
+#   - "987654321"

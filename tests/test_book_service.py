@@ -42,25 +42,31 @@ class TestCheckEnv:
         assert svc._check_env() is False
 
 
+NETWORK_PATCH = patch("src.plugins.chatbot.services.book_service.BookService._check_and_update_network", return_value="")
+
+
 @pytest.mark.asyncio
 class TestHandleJmDownload:
 
+    @NETWORK_PATCH
     @patch("src.plugins.chatbot.services.book_service.BookService._check_env", return_value=False)
-    async def test_returns_error_when_env_incomplete(self, mock_check):
+    async def test_returns_error_when_env_incomplete(self, mock_check, mock_net):
         from src.plugins.chatbot.services.book_service import BookService
         svc = BookService()
         result = await svc.handle_jm_download(MagicMock(), 123, "group", ["111"])
         assert "环境配置不完整" in result
 
-    async def test_returns_error_for_empty_ids(self):
+    @NETWORK_PATCH
+    async def test_returns_error_for_empty_ids(self, mock_net):
         from src.plugins.chatbot.services.book_service import BookService
         svc = BookService()
         result = await svc.handle_jm_download(MagicMock(), 123, "group", [])
         assert "请提供 ID" in result
 
+    @NETWORK_PATCH
     @patch("src.plugins.chatbot.services.book_service.BookService._sync_download_single")
     @patch("src.plugins.chatbot.services.book_service.BookService._encrypt_pdf_task")
-    async def test_sends_processing_message(self, mock_enc, mock_dl):
+    async def test_sends_processing_message(self, mock_enc, mock_dl, mock_net):
         from src.plugins.chatbot.services.book_service import BookService
         bot = MagicMock()
         bot.send_group_msg = AsyncMock()
@@ -75,10 +81,11 @@ class TestHandleJmDownload:
         assert "开始处理" in str(call_args)
         assert call_args[1]["group_id"] == 999
 
+    @NETWORK_PATCH
     @patch("src.plugins.chatbot.services.book_service.BookService._sync_download_single")
     @patch("src.plugins.chatbot.services.book_service.PDFUtils.convert_zip_to_pdf")
     @patch("src.plugins.chatbot.services.book_service.BookService._encrypt_pdf_task")
-    async def test_full_flow_success(self, mock_enc, mock_conv, mock_dl):
+    async def test_full_flow_success(self, mock_enc, mock_conv, mock_dl, mock_net):
         from src.plugins.chatbot.services.book_service import BookService
         bot = MagicMock()
         bot.send_group_msg = AsyncMock()
@@ -106,8 +113,9 @@ class TestHandleJmDownload:
         assert "成功" in result or "完成" in result
         mock_dl.assert_called_once_with("350234")
 
+    @NETWORK_PATCH
     @patch("src.plugins.chatbot.services.book_service.BookService._sync_download_single")
-    async def test_reports_failures(self, mock_dl):
+    async def test_reports_failures(self, mock_dl, mock_net):
         from src.plugins.chatbot.services.book_service import BookService
         bot = MagicMock()
         bot.send_group_msg = AsyncMock()
@@ -118,9 +126,10 @@ class TestHandleJmDownload:
         result = await svc.handle_jm_download(bot, 999, "group", ["350234"])
         assert "失败" in result
 
+    @NETWORK_PATCH
     @patch("src.plugins.chatbot.services.book_service.BookService._sync_download_single")
     @patch("src.plugins.chatbot.services.book_service.BookService._encrypt_pdf_task")
-    async def test_removes_duplicate_ids(self, mock_enc, mock_dl):
+    async def test_removes_duplicate_ids(self, mock_enc, mock_dl, mock_net):
         from src.plugins.chatbot.services.book_service import BookService
         bot = MagicMock()
         bot.send_group_msg = AsyncMock()

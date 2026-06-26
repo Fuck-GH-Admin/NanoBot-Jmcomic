@@ -39,8 +39,8 @@ async def clear_temp_directory():
             # 暴力删除整个目录
             shutil.rmtree(temp_dir, ignore_errors=True)
             logger.info(f"[Lifecycle] 已清理临时目录: {temp_dir}")
-        except Exception as e:
-            logger.warning(f"[Lifecycle] 清理临时目录失败: {e}")
+        except Exception:
+            logger.exception("[Lifecycle] 清理临时目录失败")
             
     # 重新创建空目录，确保后续下载任务能找到路径
     temp_dir.mkdir(parents=True, exist_ok=True)

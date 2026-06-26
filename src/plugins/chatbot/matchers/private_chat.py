@@ -8,7 +8,7 @@ from nonebot.rule import Rule
 from nonebot.log import logger
 from nonebot.exception import FinishedException
 
-from ..services import book_srv
+from ..services import book_srv, perm_srv
 
 # 只响应私聊消息
 async def _is_private(event: PrivateMessageEvent) -> bool:
@@ -23,6 +23,13 @@ async def handle_private(bot: Bot, event: PrivateMessageEvent, text: str = Event
         return
     
     user_id = str(event.user_id)
+    
+    # 私聊白名单检查
+    if not perm_srv.is_private_whitelisted(user_id):
+        logger.warning(f"[JM] 私聊拒绝: User:{user_id} 不在白名单中")
+        await private_chat.finish("⛔ 你没有使用权限")
+        return
+    
     logger.info(f"[JM] 收到私聊消息: User:{user_id} | Text:{text}")
     
     # 处理 /jm 指令
@@ -43,9 +50,9 @@ async def handle_private(bot: Bot, event: PrivateMessageEvent, text: str = Event
                 await private_chat.finish(res)
             except FinishedException:
                 raise  # 不捕获FinishedException
-            except Exception as e:
-                logger.error(f"[JM] 私聊下载任务执行失败: {e}")
-                await private_chat.finish(f"下载任务执行失败: {str(e)}")
+            except Exception:
+                logger.exception("[JM] 私聊下载任务执行失败")
+                await private_chat.finish("下载任务执行失败，请稍后重试或检查网络")
         else:
             await private_chat.finish("没有识别到有效的数字ID哦")
         return

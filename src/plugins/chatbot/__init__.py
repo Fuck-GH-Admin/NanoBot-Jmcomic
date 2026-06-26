@@ -8,6 +8,9 @@ from nonebot.plugin import PluginMetadata
 # 引入配置（可选，确保配置被加载）
 from .config import Config
 
+# 挂载 REST API
+from . import api
+
 # 【关键】从 matchers 包中导入所有事件响应器
 # 这样 NoneBot 才能在加载插件时注册这些事件
 from .matchers import (

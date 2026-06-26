@@ -35,6 +35,7 @@ class ConfigManager:
         self._config = Config()
         self._lock = threading.Lock()
         self._observer: Optional[Observer] = None
+        self._callbacks: list = []
         self.load_config()
         self._start_watcher()
 
@@ -75,6 +76,15 @@ class ConfigManager:
 
                 setattr(self._config, key, value)
 
+        for cb in self._callbacks:
+            try:
+                cb()
+            except Exception:
+                pass
+
+    def on_change(self, callback):
+        self._callbacks.append(callback)
+
     def _generate_default_yaml(self):
         """生成初始配置文件"""
         default = {
@@ -114,7 +124,7 @@ class ConfigManager:
         return getattr(self._config, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name in ("_config", "_lock", "_observer"):
+        if name in ("_config", "_lock", "_observer", "_callbacks"):
             super().__setattr__(name, value)
         else:
             setattr(self._config, name, value)

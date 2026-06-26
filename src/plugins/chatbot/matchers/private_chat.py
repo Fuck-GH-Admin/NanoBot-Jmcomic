@@ -1,6 +1,5 @@
 import re
 import asyncio
-import time
 from nonebot import on_message
 from nonebot.rule import Rule
 from nonebot.adapters.onebot.v11 import Bot, PrivateMessageEvent
@@ -11,33 +10,16 @@ from nonebot.exception import FinishedException
 from ..services import book_srv, perm_srv
 from ..models import TaskResult
 from ..utils.string_utils import StringUtils
+from ..utils.rate_limiter import check as check_rate_limit, remaining as rate_remaining
 
 from .group_chat import _run_download_with_progress, _send_results, _send_progress
 
 
-USER_LIMIT_PER_MINUTE = 1
-_user_usage: dict = {}
+async def _is_friend_private(event: PrivateMessageEvent) -> bool:
+    return event.sub_type == "friend"
 
 
-def _check_rate_limit(user_id: str) -> bool:
-    now = time.time()
-    last = _user_usage.get(user_id, 0)
-    if now - last < 60:
-        return False
-    _user_usage[user_id] = now
-    return True
-
-
-def _rate_limit_remaining(user_id: str) -> int:
-    last = _user_usage.get(user_id, 0)
-    remaining = int(60 - (time.time() - last))
-    return max(0, remaining)
-
-
-async def _is_private(event: PrivateMessageEvent) -> bool:
-    return True
-
-private_chat = on_message(rule=Rule(_is_private), priority=1, block=True)
+private_chat = on_message(rule=Rule(_is_friend_private), priority=1, block=True)
 
 
 @private_chat.handle()
@@ -71,8 +53,8 @@ async def handle_private(bot: Bot, event: PrivateMessageEvent, text: str = Event
     if match:
         ids = re.findall(r'\d+', match.group(1))
         if ids:
-            if not _check_rate_limit(user_id):
-                sec = _rate_limit_remaining(user_id)
+            if not check_rate_limit(user_id):
+                sec = rate_remaining(user_id)
                 await private_chat.finish(f"⏳ 操作过于频繁，请 {sec} 秒后重试")
             await private_chat.send(f"⏳ [私聊] 正在调度下载任务: {ids}")
             try:

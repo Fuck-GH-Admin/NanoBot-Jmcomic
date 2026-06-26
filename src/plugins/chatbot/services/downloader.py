@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -35,10 +36,25 @@ class JmDownloader:
         self.option_path = option_path
         self.books_dir = books_dir
 
+    def _find_local_zip(self, album_id: str) -> Optional[Path]:
+        if not self.books_dir.exists():
+            return None
+        escaped = re.escape(album_id)
+        pattern = re.compile(rf'^{escaped}(_|$)')
+        for f in self.books_dir.iterdir():
+            if f.suffix == '.zip' and pattern.match(f.stem):
+                return f
+        return None
+
     def download_album(self, album_id: str) -> List[Dict[str, Any]]:
         import jmcomic
         results = []
         try:
+            existing = self._find_local_zip(album_id)
+            if existing:
+                logger.info(f"[JmDL] 本地已有 {existing.name}，跳过下载")
+                return [{'id': album_id, 'title': existing.stem, 'path': existing, 'series_ids': []}]
+
             option = JmOptionCache.get_option(self.option_path)
             option.dir_rule.base_dir = str(self.temp_dir)
             downloader = jmcomic.JmDownloader(option)

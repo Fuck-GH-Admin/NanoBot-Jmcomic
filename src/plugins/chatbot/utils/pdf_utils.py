@@ -1,12 +1,10 @@
 import zipfile
 import re
-import uuid
 import io
 import img2pdf
 from pathlib import Path
 from typing import Union
 from PIL import Image
-from PyPDF2 import PdfWriter, PdfReader
 from nonebot.log import logger
 
 # 支持的图片格式
@@ -117,38 +115,3 @@ class PDFUtils:
             logger.debug(traceback.format_exc())
             return ""
 
-    @staticmethod
-    def modify_pdf_metadata(input_pdf: Union[str, Path], output_pdf: Union[str, Path]) -> bool:
-        """
-        混淆元数据 (保持不变)
-        """
-        try:
-            input_pdf = Path(input_pdf)
-            output_pdf = Path(output_pdf)
-            
-            if not input_pdf.exists():
-                return False
-
-            reader = PdfReader(str(input_pdf))
-            writer = PdfWriter()
-            writer.append_pages_from_reader(reader)
-            
-            unique_id = str(uuid.uuid4())
-            new_metadata = {
-                "/Title": f"Doc_{unique_id[:8]}",
-                "/Author": "Reader",
-                "/Producer": "Generic PDF Library",
-                "/Creator": f"Bot_v{uuid.uuid4().hex[:4]}",
-                "/Keywords": unique_id
-            }
-            
-            writer.add_metadata(new_metadata)
-            output_pdf.parent.mkdir(parents=True, exist_ok=True)
-            
-            with open(output_pdf, "wb") as f:
-                writer.write(f)
-            
-            return True
-        except Exception as e:
-            logger.error(f"[PDFUtils] Metadata error: {e}")
-            return False

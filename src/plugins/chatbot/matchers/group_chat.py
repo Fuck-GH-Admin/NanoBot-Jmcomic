@@ -1,6 +1,5 @@
 import re
 import asyncio
-import time
 from nonebot import on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 from nonebot.params import EventPlainText
@@ -10,25 +9,8 @@ from nonebot.exception import FinishedException
 from ..services import book_srv, perm_srv
 from ..models import TaskResult
 from ..utils.string_utils import StringUtils
-
-
-USER_LIMIT_PER_MINUTE = 1
-_user_usage: dict = {}
-
-
-def _check_rate_limit(user_id: str) -> bool:
-    now = time.time()
-    last = _user_usage.get(user_id, 0)
-    if now - last < 60:
-        return False
-    _user_usage[user_id] = now
-    return True
-
-
-def _rate_limit_remaining(user_id: str) -> int:
-    last = _user_usage.get(user_id, 0)
-    remaining = int(60 - (time.time() - last))
-    return max(0, remaining)
+from ..utils.rate_limiter import check as check_rate_limit, remaining as rate_remaining
+from ..config import plugin_config
 
 
 group_chat = on_message(priority=10, block=False)
@@ -55,14 +37,14 @@ async def handle_group_chat(bot: Bot, event: GroupMessageEvent, text: str = Even
             f"  /jm <ID>    下载本子\n"
             f"  /jm <ID1 ID2>  批量下载\n"
             f"  苦命鸳鸯    触发彩蛋\n"
-            f"🔒 加密密码：{__import__('src.plugins.chatbot.config', fromlist=['plugin_config']).plugin_config.encrypt_password}"
+            f"🔒 加密密码：{plugin_config.encrypt_password}"
         )
         return
 
     if "苦命鸳鸯" in text:
         try:
-            if not _check_rate_limit(user_id):
-                sec = _rate_limit_remaining(user_id)
+            if not check_rate_limit(user_id):
+                sec = rate_remaining(user_id)
                 await group_chat.finish(f"⏳ 操作过于频繁，请 {sec} 秒后重试")
             results = await _run_download_with_progress(bot, group_id, "group",
                 lambda p: _send_progress(bot, group_id, "group", p),
@@ -82,8 +64,8 @@ async def handle_group_chat(bot: Bot, event: GroupMessageEvent, text: str = Even
     if jm_match:
         ids = re.findall(r'\d+', jm_match.group(1))
         if ids:
-            if not _check_rate_limit(user_id):
-                sec = _rate_limit_remaining(user_id)
+            if not check_rate_limit(user_id):
+                sec = rate_remaining(user_id)
                 await group_chat.finish(f"⏳ 操作过于频繁，请 {sec} 秒后重试")
             await group_chat.send(f"⏳ 正在调度下载任务: {ids}")
             try:
@@ -151,11 +133,12 @@ async def _send_results(bot: Bot, target: int, mtype: str, results: list):
     if series_ids_all:
         unique = sorted(set(series_ids_all))
         if len(unique) > 50:
-            ids_str = ', '.join(unique[:50]) + f'... 等{len(unique)}个'
+            ids_str = ' '.join(unique[:50]) + f'... 等{len(unique)}个'
         else:
-            ids_str = ', '.join(unique)
+            ids_str = ' '.join(unique)
         try:
-            await _send_progress(bot, target, mtype, f"📚 系列本关联章节ID：\n{ids_str}")
+            await _send_progress(bot, target, mtype,
+                f"📚 该本子属于系列，其他章节：\n/jm {ids_str}\n（复制上方指令可直接下载）")
         except Exception:
             pass
 

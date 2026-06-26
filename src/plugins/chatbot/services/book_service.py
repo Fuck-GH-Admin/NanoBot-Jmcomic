@@ -40,14 +40,19 @@ class BookService:
         if now - self._last_network_check < 300:
             return self._network_msg
         self._last_network_check = now
+        changed = False
         if NetworkUtils.test_connectivity(timeout=3):
             NetworkUtils.update_option_proxy(str(self.option_path), enable_proxy=False)
             self._network_msg = "🌐 网络：直连模式"
+            changed = True
         elif NetworkUtils.test_proxy_connectivity("http://127.0.0.1:7890", timeout=3):
             NetworkUtils.update_option_proxy(str(self.option_path), enable_proxy=True)
             self._network_msg = "🌐 网络：代理模式 (127.0.0.1:7890)"
+            changed = True
         else:
             self._network_msg = "🌐 网络：不可用，下载可能失败"
+        if changed:
+            JmOptionCache.invalidate()
         return self._network_msg
 
     def refresh_paths(self):
@@ -70,6 +75,7 @@ class BookService:
         request_ids = set(ids)
         loop = asyncio.get_running_loop()
         semaphore = asyncio.Semaphore(3)
+        in_progress: set[str] = set()
 
         password = plugin_config.encrypt_password
         if progress:
@@ -82,6 +88,10 @@ class BookService:
         results: List[TaskResult] = []
 
         async def process_one(aid: str):
+            if aid in in_progress:
+                results.append(TaskResult(aid, aid, False, error_msg="已有相同任务进行中"))
+                return
+            in_progress.add(aid)
             async with semaphore:
                 try:
                     items = await asyncio.wait_for(
@@ -119,8 +129,6 @@ class BookService:
                         cleanup = []
                         if enc and enc.exists():
                             cleanup.append(enc)
-                        if pdf and pdf.parent == self.repo.output_dir:
-                            pass  # keep unencrypted PDF as cache
 
                         results.append(TaskResult(
                             album_id=aid,
@@ -139,6 +147,8 @@ class BookService:
                 except Exception:
                     logger.exception(f"[JM] 处理失败 {aid}")
                     results.append(TaskResult(aid, aid, False, error_msg="处理异常"))
+                finally:
+                    in_progress.discard(aid)
 
         tasks = [process_one(aid) for aid in ids]
         await asyncio.gather(*tasks)

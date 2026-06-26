@@ -383,7 +383,7 @@ class BookService:
         else:
             # 2. 裸连不可用，测试代理
             logger.info("[JM] 裸连不可用，测试代理...")
-            if NetworkUtils.test_proxy_connectivity("127.0.0.1:7890", timeout=3):
+            if NetworkUtils.test_proxy_connectivity("http://127.0.0.1:7890", timeout=3):
                 logger.info("[JM] 代理可用，启用代理")
                 self._need_proxy = True
                 NetworkUtils.update_option_proxy(str(self.option_yaml_path), enable_proxy=True)

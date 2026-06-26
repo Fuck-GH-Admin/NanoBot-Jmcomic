@@ -66,7 +66,7 @@ class NetworkUtils:
         return False
     
     @staticmethod
-    def update_option_proxy(option_path: str, enable_proxy: bool, proxy: str = "127.0.0.1:7890") -> bool:
+    def update_option_proxy(option_path: str, enable_proxy: bool, proxy: str = "http://127.0.0.1:7890") -> bool:
         """
         更新option.yml中的代理配置
         """

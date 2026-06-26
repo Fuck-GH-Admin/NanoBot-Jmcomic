@@ -22,8 +22,8 @@ async def handle_group_chat(bot: Bot, event: GroupMessageEvent, text: str = Even
     user_id = str(event.user_id)
     
     # 去掉@bot的部分（如果有）
-    # 消息中可能包含 [at:qq=xxx,name=xxx] 格式
-    text = re.sub(r'\[at:qq=\d+,name=[^\]]*\]\s*', '', text).strip()
+    # OneBot V11 格式: [CQ:at,qq=xxx]
+    text = re.sub(r'\[CQ:at,qq=\d+\]\s*', '', text).strip()
     
     logger.info(f"[JM] 收到群消息: User:{user_id} | Text:{text}")
     

@@ -28,9 +28,6 @@ data/jm_temp/
 *.tmp
 *.log
 
-# 测试文件
-test_*.py
-
 # 系统文件
 .DS_Store
 Thumbs.db

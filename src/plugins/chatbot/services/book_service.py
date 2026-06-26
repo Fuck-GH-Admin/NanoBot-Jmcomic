@@ -63,8 +63,9 @@ class BookService:
         if not ids:
             return "❌ 请提供 ID"
 
-        # 去重
+        # 去重（保持顺序）
         ids = list(dict.fromkeys(ids))
+        request_ids = set(ids)  # 记录原始请求的ID，用于系列本去重
         
         logger.info(f"[JM] 开始下载任务: {len(ids)}个本子")
         
@@ -75,7 +76,8 @@ class BookService:
         else:
             await bot.send_private_msg(user_id=target_id, message=msg_text)
         
-        # 流式处理：边下边转换边发
+        # 并发限制为3
+        semaphore = asyncio.Semaphore(3)
         loop = asyncio.get_running_loop()
         success_count = 0
         failed_ids = []
@@ -85,97 +87,112 @@ class BookService:
             """下载单个本子，转换，发送"""
             nonlocal success_count, failed_ids, series_ids_all
             
-            try:
-                # 1. 下载（在线程池中执行）
-                items = await loop.run_in_executor(None, self._sync_download_single, album_id)
-                if not items:
-                    failed_ids.append(album_id)
-                    return
-                
-                for item in items:
-                    source_path = item['path']
-                    title = item.get('title', source_path.stem)
-                    series_ids = item.get('series_ids', [])
-                    
-                    # 收集系列本ID
-                    if series_ids:
-                        series_ids_all.extend(series_ids)
-                    
-                    # 2. 转换为PDF
-                    target_pdf = source_path
-                    if source_path.suffix.lower() != '.pdf':
-                        expected_pdf_path = self.repo.get_pdf_output_path(source_path)
-                        if expected_pdf_path.exists():
-                            target_pdf = expected_pdf_path
-                        else:
-                            result_str = await loop.run_in_executor(
-                                None, PDFUtils.convert_zip_to_pdf,
-                                str(source_path), str(self.repo.output_dir)
-                            )
-                            if result_str and Path(result_str).exists():
-                                target_pdf = Path(result_str)
-                    
-                    # 3. 加密
-                    ready_to_send = target_pdf
-                    is_temp = False
-                    if ready_to_send.suffix.lower() == '.pdf':
-                        temp_path = self.temp_dir / f"enc_{uuid.uuid4().hex[:8]}_{target_pdf.name}"
-                        enc_path = await loop.run_in_executor(
-                            None, self._encrypt_pdf_task, target_pdf, temp_path, "114514"
-                        )
-                        if enc_path and enc_path.exists():
-                            ready_to_send = enc_path
-                            is_temp = True
-                    
-                    # 4. 发送
-                    safe_title = "".join(c for c in title if c not in '<>:"/\\|?*') or album_id
-                    send_name = f"{safe_title}.pdf"
-                    
-                    if ready_to_send.exists():
-                        file_size = ready_to_send.stat().st_size
-                        timeout = 30 + (file_size / (50 * 1024))
-                        
-                        try:
-                            if message_type == "group":
-                                await bot.call_api("upload_group_file", group_id=target_id,
-                                    file=str(ready_to_send.absolute()), name=send_name, timeout=timeout)
-                            else:
-                                await bot.call_api("upload_private_file", user_id=target_id,
-                                    file=str(ready_to_send.absolute()), name=send_name, timeout=timeout)
-                            success_count += 1
-                            logger.info(f"[JM] ✅ 发送成功: {send_name}")
-                        except Exception as e:
-                            logger.error(f"[JM] ❌ 发送失败 {album_id}: {e}")
-                            failed_ids.append(album_id)
-                        
-                        # 清理临时文件
-                        if is_temp:
-                            await asyncio.sleep(1)
-                            try:
-                                ready_to_send.unlink()
-                            except:
-                                pass
-                    else:
-                        failed_ids.append(album_id)
-                        
-            except Exception as e:
-                logger.error(f"[JM] 处理失败 {album_id}: {e}")
-                failed_ids.append(album_id)
-        
-        # 并行处理所有本子（限制并发数避免过多）
-        semaphore = asyncio.Semaphore(5)  # 最多5个并发
-        
-        async def limited_process(album_id):
             async with semaphore:
-                await process_and_send_single(album_id)
+                try:
+                    # 1. 下载（在线程池中执行）
+                    items = await loop.run_in_executor(None, self._sync_download_single, album_id)
+                    if not items:
+                        failed_ids.append(album_id)
+                        return
+                    
+                    for item in items:
+                        source_path = item['path']
+                        title = item.get('title', source_path.stem)
+                        series_ids = item.get('series_ids', [])
+                        
+                        # 收集系列本ID（排除已请求的ID）
+                        for sid in series_ids:
+                            if sid not in request_ids:
+                                series_ids_all.append(sid)
+                        
+                        # 2. 校验文件大小（小于10KB认为是无效的）
+                        if source_path.exists() and source_path.stat().st_size < 10240:
+                            logger.warning(f"[JM] 文件过小，跳过: {source_path.name} ({source_path.stat().st_size}B)")
+                            failed_ids.append(album_id)
+                            continue
+                        
+                        # 3. 转换为PDF
+                        target_pdf = source_path
+                        if source_path.suffix.lower() != '.pdf':
+                            expected_pdf_path = self.repo.get_pdf_output_path(source_path)
+                            if expected_pdf_path.exists():
+                                target_pdf = expected_pdf_path
+                            else:
+                                result_str = await loop.run_in_executor(
+                                    None, PDFUtils.convert_zip_to_pdf,
+                                    str(source_path), str(self.repo.output_dir)
+                                )
+                                if result_str and Path(result_str).exists():
+                                    target_pdf = Path(result_str)
+                        
+                        # 4. 加密
+                        ready_to_send = target_pdf
+                        is_temp = False
+                        if ready_to_send.suffix.lower() == '.pdf':
+                            temp_path = self.temp_dir / f"enc_{uuid.uuid4().hex[:8]}_{target_pdf.name}"
+                            enc_path = await loop.run_in_executor(
+                                None, self._encrypt_pdf_task, target_pdf, temp_path, "114514"
+                            )
+                            if enc_path and enc_path.exists():
+                                ready_to_send = enc_path
+                                is_temp = True
+                        
+                        # 5. 发送（最多重试2次）
+                        safe_title = "".join(c for c in title if c not in '<>:"/\\|?*') or album_id
+                        send_name = f"{safe_title}.pdf"
+                        
+                        if ready_to_send.exists():
+                            file_size = ready_to_send.stat().st_size
+                            timeout = 30 + (file_size / (50 * 1024))
+                            
+                            sent = False
+                            for retry in range(2):  # 最多重试2次
+                                try:
+                                    if message_type == "group":
+                                        await bot.call_api("upload_group_file", group_id=target_id,
+                                            file=str(ready_to_send.absolute()), name=send_name, timeout=timeout)
+                                    else:
+                                        await bot.call_api("upload_private_file", user_id=target_id,
+                                            file=str(ready_to_send.absolute()), name=send_name, timeout=timeout)
+                                    sent = True
+                                    success_count += 1
+                                    logger.info(f"[JM] ✅ 发送成功: {send_name}")
+                                    break
+                                except Exception as e:
+                                    logger.warning(f"[JM] 发送重试 {retry+1}/2: {e}")
+                                    await asyncio.sleep(2)
+                            
+                            if not sent:
+                                logger.error(f"[JM] ❌ 发送失败: {album_id}")
+                                failed_ids.append(album_id)
+                            
+                            # 清理临时文件
+                            if is_temp:
+                                await asyncio.sleep(1)
+                                try:
+                                    ready_to_send.unlink()
+                                except:
+                                    pass
+                        else:
+                            failed_ids.append(album_id)
+                            
+                except Exception as e:
+                    logger.error(f"[JM] 处理失败 {album_id}: {e}")
+                    failed_ids.append(album_id)
         
-        tasks = [limited_process(aid) for aid in ids]
+        # 并行处理所有本子
+        tasks = [process_and_send_single(aid) for aid in ids]
         await asyncio.gather(*tasks)
         
-        # 发送系列本信息
+        # 发送系列本ID列表（去重后）
         if series_ids_all:
             unique_ids = sorted(set(series_ids_all))
-            series_msg = f"📚 系列本关联章节ID：\n{', '.join(unique_ids)}"
+            # 限制显示数量，避免消息过长
+            if len(unique_ids) > 50:
+                ids_str = ', '.join(unique_ids[:50]) + f'... 等{len(unique_ids)}个'
+            else:
+                ids_str = ', '.join(unique_ids)
+            series_msg = f"📚 系列本关联章节ID：\n{ids_str}"
             try:
                 if message_type == "group":
                     await bot.send_group_msg(group_id=target_id, message=series_msg)
@@ -187,9 +204,10 @@ class BookService:
         # 汇总
         msg = f"✅ 任务完成：成功 {success_count}/{len(ids)} 本"
         if failed_ids:
-            msg += f"\n❌ 失败：{', '.join(failed_ids[:10])}"
+            unique_failed = list(dict.fromkeys(failed_ids))[:10]
+            msg += f"\n❌ 失败：{', '.join(unique_failed)}"
             if len(failed_ids) > 10:
-                msg += f" 等{len(failed_ids)}个"
+                msg += f" 等{len(set(failed_ids))}个"
         return msg
 
     async def handle_bitter_lovebirds(self, bot: Bot, group_id: int) -> str:

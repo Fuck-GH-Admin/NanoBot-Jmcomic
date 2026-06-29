@@ -14,7 +14,10 @@ class PermissionService:
     def is_private_whitelisted(self, user_id: str) -> bool:
         if self.is_superuser(user_id):
             return True
-        return user_id in plugin_config.private_whitelist
+        wl = plugin_config.private_whitelist
+        if not wl:
+            return True
+        return user_id in wl
 
     def is_group_whitelisted(self, group_id: str) -> bool:
         wl = plugin_config.group_whitelist

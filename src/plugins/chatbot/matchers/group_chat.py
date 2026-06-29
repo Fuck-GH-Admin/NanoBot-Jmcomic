@@ -23,9 +23,9 @@ async def handle_group_chat(bot: Bot, event: GroupMessageEvent, text: str = Even
         return
 
     user_id = str(event.user_id)
-    group_id = str(event.group_id)
+    group_id = int(event.group_id)
 
-    if not perm_srv.is_group_whitelisted(group_id):
+    if not perm_srv.is_group_whitelisted(str(group_id)):
         return
 
     text = re.sub(r'\[CQ:at,qq=\d+\]\s*', '', text).strip()
@@ -154,26 +154,36 @@ async def _send_results(bot: Bot, target: int, mtype: str, results: list):
         if mtype == "group":
             await bot.send_group_msg(group_id=target, message=msg)
         else:
-            await bot.send_private_msg(user_id=target, message=msg)
+            await bot.send_private_msg(user_id=int(target), message=msg)
     except Exception:
         pass
 
 
 async def _upload_file(bot: Bot, target: int, mtype: str, result: TaskResult):
     safe_title = StringUtils.sanitize_filename(result.title) or result.album_id
-    send_name = f"{safe_title}.pdf"
+    send_name = f"{result.album_id}_{safe_title}.pdf"
     fp = result.file_path
-    if not fp or not fp.exists():
+    if not fp:
+        logger.warning(f"[JM] 跳过发送 {send_name}: file_path 为 None")
+        return
+    if not fp.exists():
+        logger.warning(f"[JM] 跳过发送 {send_name}: 文件不存在 {fp}")
         return
     file_size = fp.stat().st_size
-    timeout = 30 + (file_size / (50 * 1024))
+    upload_timeout = 30 + (file_size / (50 * 1024))
     for retry in range(2):
         try:
             api = "upload_group_file" if mtype == "group" else "upload_private_file"
             key = "group_id" if mtype == "group" else "user_id"
-            await bot.call_api(api, **{key: target}, file=str(fp.absolute()), name=send_name, timeout=timeout)
+            await asyncio.wait_for(
+                bot.call_api(api, **{key: target}, file=str(fp.absolute()), name=send_name),
+                timeout=upload_timeout,
+            )
             logger.info(f"[JM] ✅ 发送成功: {send_name}")
             return
+        except asyncio.TimeoutError:
+            logger.warning(f"[JM] 发送超时 {send_name} 重试 {retry+1}/2")
+            await asyncio.sleep(2)
         except Exception as e:
-            logger.warning(f"[JM] 发送重试 {retry+1}/2: {e}")
+            logger.warning(f"[JM] 发送失败 {send_name}: {e} 重试 {retry+1}/2")
             await asyncio.sleep(2)

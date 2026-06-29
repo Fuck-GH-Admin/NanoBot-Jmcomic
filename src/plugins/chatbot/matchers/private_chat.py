@@ -28,14 +28,15 @@ async def handle_private(bot: Bot, event: PrivateMessageEvent, text: str = Event
     if not text:
         return
 
-    user_id = str(event.user_id)
+    user_id_str = str(event.user_id)
+    user_id = int(event.user_id)
 
-    if not perm_srv.is_private_whitelisted(user_id):
-        logger.warning(f"[JM] 私聊拒绝 User:{user_id}")
+    if not perm_srv.is_private_whitelisted(user_id_str):
+        logger.warning(f"[JM] 私聊拒绝 User:{user_id_str}")
         await private_chat.finish("⛔ 你没有使用权限")
         return
 
-    logger.info(f"[JM] 私聊: User:{user_id} | {text}")
+    logger.info(f"[JM] 私聊: User:{user_id_str} | {text}")
 
     if re.match(r'^(/jm|jm|帮助|help|\?)$', text.strip(), re.IGNORECASE):
         from ..config import plugin_config
@@ -53,8 +54,8 @@ async def handle_private(bot: Bot, event: PrivateMessageEvent, text: str = Event
     if match:
         ids = re.findall(r'\d+', match.group(1))
         if ids:
-            if not check_rate_limit(user_id):
-                sec = rate_remaining(user_id)
+            if not check_rate_limit(user_id_str):
+                sec = rate_remaining(user_id_str)
                 await private_chat.finish(f"⏳ 操作过于频繁，请 {sec} 秒后重试")
             await private_chat.send(f"⏳ [私聊] 正在调度下载任务: {ids}")
             try:

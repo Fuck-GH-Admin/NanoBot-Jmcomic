@@ -59,6 +59,8 @@ class JmDownloader:
                 while idx < len(parts) and parts[idx].isdigit():
                     idx += 1
                 clean_title = '_'.join(parts[idx:]) if idx > 0 else stem
+                if not clean_title.strip('_ '):
+                    clean_title = album_id
                 return [{'id': album_id, 'title': clean_title, 'path': existing, 'series_ids': []}]
 
             option = JmOptionCache.get_option(self.option_path)

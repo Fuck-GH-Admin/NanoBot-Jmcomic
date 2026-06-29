@@ -157,7 +157,10 @@ async def _upload_file(bot: Bot, target: int, mtype: str, result: TaskResult):
     safe_title = StringUtils.sanitize_filename(result.title) or result.album_id
     if safe_title.startswith(f"{result.album_id}_"):
         safe_title = safe_title[len(result.album_id) + 1:]
-    send_name = f"{result.album_id}_{safe_title}.pdf"
+    if safe_title == result.album_id:
+        send_name = f"{safe_title}.pdf"
+    else:
+        send_name = f"{result.album_id}_{safe_title}.pdf"
     fp = result.file_path
     if not fp:
         logger.warning(f"[JM] 跳过发送 {send_name}: file_path 为 None")

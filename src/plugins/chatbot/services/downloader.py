@@ -53,7 +53,13 @@ class JmDownloader:
             existing = self._find_local_zip(album_id)
             if existing:
                 logger.info(f"[JmDL] 本地已有 {existing.name}，跳过下载")
-                return [{'id': album_id, 'title': existing.stem, 'path': existing, 'series_ids': []}]
+                stem = existing.stem
+                parts = stem.split('_')
+                idx = 0
+                while idx < len(parts) and parts[idx].isdigit():
+                    idx += 1
+                clean_title = '_'.join(parts[idx:]) if idx > 0 else stem
+                return [{'id': album_id, 'title': clean_title, 'path': existing, 'series_ids': []}]
 
             option = JmOptionCache.get_option(self.option_path)
             option.dir_rule.base_dir = str(self.temp_dir)

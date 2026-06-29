@@ -100,9 +100,13 @@ async def _run_download_with_progress(
     progress_cb, ids=None, bitter_lovebirds=False
 ) -> list:
     loop = asyncio.get_running_loop()
+    async def send_and_clean(r: TaskResult):
+        if r.success and r.file_path:
+            await _upload_file(bot, target, mtype, r)
+            await _cleanup_result(r)
     if bitter_lovebirds:
-        return await book_srv.process_bitter_lovebirds(progress=progress_cb)
-    return await book_srv.process_download(ids or [], progress=progress_cb)
+        return await book_srv.process_bitter_lovebirds(progress=progress_cb, on_result=send_and_clean)
+    return await book_srv.process_download(ids or [], progress=progress_cb, on_result=send_and_clean)
 
 
 async def _cleanup_result(result: TaskResult):
@@ -116,19 +120,9 @@ async def _cleanup_result(result: TaskResult):
 
 async def _send_results(bot: Bot, target: int, mtype: str, results: list):
     series_ids_all = []
-    send_tasks = []
-
-    for r in results:
-        if r.success and r.file_path:
-            send_tasks.append(_upload_file(bot, target, mtype, r))
-            series_ids_all.extend(s for s in r.series_ids if s not in series_ids_all)
-
-    if send_tasks:
-        await asyncio.gather(*send_tasks)
-
     for r in results:
         if r.success:
-            await _cleanup_result(r)
+            series_ids_all.extend(s for s in r.series_ids if s not in series_ids_all)
 
     if series_ids_all:
         unique = sorted(set(series_ids_all))

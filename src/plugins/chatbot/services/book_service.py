@@ -64,7 +64,8 @@ class BookService:
         JmOptionCache.invalidate()
 
     async def process_download(
-        self, ids: List[str], progress: Optional[ProgressCallback] = None
+        self, ids: List[str], progress: Optional[ProgressCallback] = None,
+        on_result: Optional[callable] = None,
     ) -> List[TaskResult]:
         if not self._check_env():
             return [TaskResult("", "", False, error_msg="环境配置不完整")]
@@ -130,14 +131,17 @@ class BookService:
                         if enc and enc.exists():
                             cleanup.append(enc)
 
-                        results.append(TaskResult(
+                        tr = TaskResult(
                             album_id=aid,
                             title=title,
                             success=True,
                             file_path=send_path,
                             series_ids=sids,
                             cleanup_paths=cleanup,
-                        ))
+                        )
+                        results.append(tr)
+                        if on_result:
+                            await on_result(tr)
                         if progress:
                             await progress(f"✅ [{title}] 处理完成")
 
@@ -154,5 +158,5 @@ class BookService:
         await asyncio.gather(*tasks)
         return results
 
-    async def process_bitter_lovebirds(self, progress: Optional[ProgressCallback] = None) -> List[TaskResult]:
-        return await self.process_download(["350234", "350235"], progress)
+    async def process_bitter_lovebirds(self, progress: Optional[ProgressCallback] = None, on_result: Optional[callable] = None) -> List[TaskResult]:
+        return await self.process_download(["350234", "350235"], progress, on_result)

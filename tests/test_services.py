@@ -100,6 +100,52 @@ class TestJmDownloader:
             assert len(result) > 0
             assert result[0]["title"] == "テスト"
 
+    def test_downloads_only_requested_photo_for_series_album(self, tmp_path):
+        from src.plugins.chatbot.services.downloader import JmDownloader, JmOptionCache
+        JmOptionCache.invalidate()
+        with (
+            patch("jmcomic.JmOption.from_file") as mock_from_file,
+            patch("jmcomic.JmDownloader") as mock_dler_cls,
+        ):
+            mock_album = MagicMock()
+            mock_album.title = "系列本"
+            mock_album.episode_list = [("1205492", 1, "ch1"), ("1205522", 29, "ch29")]
+            mock_client = MagicMock()
+            mock_client.get_album_detail.return_value = mock_album
+            mock_option = MagicMock()
+            mock_option.dir_rule.base_dir = str(tmp_path / "temp")
+            mock_from_file.return_value = mock_option
+            mock_dler = MagicMock()
+            mock_dler.client = mock_client
+            mock_dler_cls.return_value = mock_dler
+
+            wanted = tmp_path / "temp" / "1205492_1205522_29_系列本"
+
+            def create_requested_photo(photo_id):
+                assert photo_id == "1205522"
+                wanted.mkdir(parents=True, exist_ok=True)
+
+            mock_dler.download_photo.side_effect = create_requested_photo
+
+            dl = JmDownloader(tmp_path / "temp", Path("option.yml"), tmp_path)
+            result = dl.download_album("1205522")
+
+            mock_dler.download_photo.assert_called_once_with("1205522")
+            mock_dler.download_album.assert_not_called()
+            assert len(result) == 1
+            assert result[0]["id"] == "1205522"
+            assert result[0]["path"].name == "1205492_1205522_29_系列本.zip"
+
+    def test_finds_cached_series_photo_by_requested_id(self, tmp_path):
+        from src.plugins.chatbot.services.downloader import JmDownloader
+        cached = make_temp_zip(tmp_path / "1205492_1205522_29_系列本.zip")
+
+        dl = JmDownloader(tmp_path / "temp", Path("option.yml"), tmp_path)
+        result = dl.download_album("1205522")
+
+        assert len(result) == 1
+        assert result[0]["path"] == cached
+
 
 class TestBookServiceProcess:
     @patch("src.plugins.chatbot.services.book_service.BookService._check_env", return_value=False)

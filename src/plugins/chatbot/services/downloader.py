@@ -40,14 +40,13 @@ class JmDownloader:
         if not self.books_dir.exists():
             return None
         escaped = re.escape(album_id)
-        pattern = re.compile(rf'^{escaped}(_|$)')
+        pattern = re.compile(rf'(^|_){escaped}(_|$)')
         for f in self.books_dir.iterdir():
-            if f.suffix == '.zip' and pattern.match(f.stem):
+            if f.suffix == '.zip' and pattern.search(f.stem):
                 return f
         return None
 
     def download_album(self, album_id: str) -> List[Dict[str, Any]]:
-        import jmcomic
         results = []
         try:
             existing = self._find_local_zip(album_id)
@@ -63,6 +62,7 @@ class JmDownloader:
                     clean_title = album_id
                 return [{'id': album_id, 'title': clean_title, 'path': existing, 'series_ids': []}]
 
+            import jmcomic
             option = JmOptionCache.get_option(self.option_path)
             option.dir_rule.base_dir = str(self.temp_dir)
             downloader = jmcomic.JmDownloader(option)
@@ -86,7 +86,10 @@ class JmDownloader:
             chapter_dirs = self._find_chapter_dirs(album_id)
             if not chapter_dirs:
                 logger.info(f"[JmDL] 下载中: {album_id}")
-                downloader.download_album(album_id)
+                if hasattr(downloader, "download_photo"):
+                    downloader.download_photo(album_id)
+                else:
+                    downloader.download_album(album_id)
                 chapter_dirs = self._find_chapter_dirs(album_id)
 
             if not chapter_dirs:
@@ -95,6 +98,7 @@ class JmDownloader:
 
             for c_dir in chapter_dirs:
                 c_name = os.path.basename(c_dir)
+                photo_id = self._extract_photo_id(c_name, album_id)
                 zip_path = self.books_dir / f"{c_name}.zip"
 
                 if not zip_path.exists():
@@ -107,7 +111,7 @@ class JmDownloader:
 
                 if zip_path.exists():
                     results.append({
-                        'id': album_id,
+                        'id': photo_id,
                         'title': title,
                         'path': zip_path,
                         'series_ids': series_ids
@@ -123,9 +127,16 @@ class JmDownloader:
         if self.temp_dir.exists():
             for d in os.listdir(self.temp_dir):
                 full = self.temp_dir / d
-                if full.is_dir() and (d == aid or d.startswith(aid + '_')):
+                if full.is_dir() and (d == aid or d.startswith(aid + '_') or f'_{aid}_' in d):
                     found.append(str(full))
         return found
+
+    @staticmethod
+    def _extract_photo_id(folder_name: str, fallback: str) -> str:
+        parts = folder_name.split('_')
+        if len(parts) >= 2 and parts[1].isdigit():
+            return parts[1]
+        return fallback
 
     @staticmethod
     def _zip_folder(folder_path: str, output_path: Path):

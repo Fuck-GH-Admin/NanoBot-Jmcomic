@@ -104,6 +104,7 @@ class BookService:
                         return
 
                     for item in items:
+                        item_id = item.get('id', aid)
                         source = item['path']
                         title = item['title']
                         sids = item['series_ids']
@@ -132,7 +133,7 @@ class BookService:
                             cleanup.append(enc)
 
                         tr = TaskResult(
-                            album_id=aid,
+                            album_id=item_id,
                             title=title,
                             success=True,
                             file_path=send_path,

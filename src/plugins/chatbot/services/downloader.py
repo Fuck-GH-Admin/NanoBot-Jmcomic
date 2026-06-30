@@ -60,7 +60,20 @@ class JmDownloader:
                 clean_title = '_'.join(parts[idx:]) if idx > 0 else stem
                 if not clean_title.strip('_ '):
                     clean_title = album_id
-                return [{'id': album_id, 'title': clean_title, 'path': existing, 'series_ids': []}]
+                series_ids = []
+                try:
+                    import jmcomic
+                    option = JmOptionCache.get_option(self.option_path)
+                    downloader = jmcomic.JmDownloader(option)
+                    album = downloader.client.get_album_detail(album_id)
+                    if album and len(album.episode_list) > 1:
+                        for ep in album.episode_list:
+                            photo_id = ep[0]
+                            if photo_id != album_id:
+                                series_ids.append(photo_id)
+                except Exception:
+                    pass
+                return [{'id': album_id, 'title': clean_title, 'path': existing, 'series_ids': series_ids}]
 
             import jmcomic
             option = JmOptionCache.get_option(self.option_path)
